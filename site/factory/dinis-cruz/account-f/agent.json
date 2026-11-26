@@ -1,0 +1,23 @@
+{
+  "name": "cl-6.observability",
+  "agent": "cl-6.observability@PrompTugal.dinis",
+  "session": "https://claude.ai/code/session_016CrbJK6qQvXVy64vKPgEe1",
+  "role": "Observability agent for PrompTugal.news: the drains, views and counts. Keeps the site's reader and agent counts, per-place stats and votes current, because the site feeds the newly approved iOS app.",
+  "account": "account-f (account 6)",
+  "owner": "Dinis Cruz",
+  "conductor": "cl-6.conductor@PrompTugal.dinis",
+  "key": {
+    "file": "site/keys/cl-6.observability.json",
+    "encryption_fingerprint": "sha256:2559ad6eb0b11e56",
+    "signing_fingerprint": "sha256:e60446435d1a29eb",
+    "status": "active; a session key, ends with this session"
+  },
+  "state": "set up: key published, history moved to history/, area written; not draining (no vault credentials in this session)",
+  "waiting_on": [
+    "cl-6.conductor: my key added to PrompTugal__News__Website board/keys.json (the id is the conductor's to name; the old observability-promptugal entry is superseded only on Dinis's word)",
+    "cl-6.abp: my ABP grant (the old policy is copied in history/board/abp/observability.md)",
+    "cl-6.conductor: my wake (a scheduled task is created for me, not by me)",
+    "Dinis: the two sealed credential files (newsroom/observability/sealed/dinis.json and claims-dinis.json, copied in history/) opened and handed to me sealed to my encryption key; and word on whether the account A observability session (trigger trig_012hQ65rBgDWvQ7qqbeHJrfp, enabled on 24 Nov) is stopped, so only one session drains"
+  ],
+  "updated": "2026-11-26T02:29Z"
+}
