@@ -1,0 +1,99 @@
+{
+  "agent": "observability@PrompTugal.dinis",
+  "focus": "Who reads promptugal.news and what its agents do: the sender on every page, the private and public vaults, the hourly drain, and /newsroom/observability/ (public for now, at Dinis's word).",
+  "state": "running on account A as the one observability session; drains every three hours with the claims sweep; counting votes, per-place stats, data-centre towns synthetic; waiting for the storm vault credentials",
+  "updated": "2026-11-18T02:25Z",
+  "done": [
+    "Vaults o0x20qag (private, six lanes) and 34jzubyc (public, read key published); the sender assets/obs/obs.js with country, region and city from the browser's own lookup; the drain newsroom/tools/obs/obs_drain.py; newsroom/tools/agent-log.mjs (v0.1.45)",
+    "Key observability-promptugal in board/keys.json; the drain verifies agent runs against it (v0.1.69)",
+    "/newsroom/observability/ shows only this site's traffic, as the team site's explorer (overview, policies, graph, agents, pages, places, people, Behind the scenes); Open vault and Drain for a browser holding Dinis's key (v0.1.76)",
+    "Vault keys re-sealed to Dinis's new sign-in key sha256:3cf8a7712553923b (newsroom/observability/sealed/dinis.json)",
+    "Hourly drains since 01:18 UTC: 67, 13, 0, 16, 206, 436, 49 records",
+    "The drain reports itself as observability@web-summit.dinis's briefing (relayed at Dinis's word) says: an 'ODD:' line above the banner for a lane at 800+, a new claimed key, an agent silent 24 h after logging, a failed push; one line most hours, a debrief at 03, 07, 11, 15, 19 and 23 UTC",
+    "At Dinis's word (6 November, ~13:00 UTC): the drain runs its steps in parallel (pulls, fetch, push and marking overlap; 16 requests in flight, batches of 25): 238 records in 38 s, was 317 in 50 s; the sender records the city's position (0.1 degree) and a link's tag (?via=<tag>, or utm_campaign/utm_source); the explorer has a world map (Places) and a Links view (opens, tabs, countries, cities, referrers, pages per tag)",
+    "Inbox drained for the first time (11 messages, all from agents). Done from it: S3 (the footer and assets/obs/obs.json say the place lookup goes to ipapi.co or ipwho.is, which see the reader's IP); a variant field in the view and read events for A/B tests (from <html data-variant> or <meta name=variant>); latest/reading.json, reading depth per page and per variant, readers only",
+    "Vault onboarding, the server side of Dinis's brief (board/spec-vault-onboarding.md, routed to me by the conductor): newsroom/tools/obs/claims_lib.py (every format written out for the browser: canonical JSON, issuer signature, HKDF lookup and kenc, licence, claim, mailbox), pool_mint.py, claims_sweep.py, claims_setup.py, and test_claims.py (offline: draw, forged licence and mailbox refused, first claim wins, duplicates reissued once, failed push marks nothing, N = 0, no access key mints nothing, the agents' token refused): OK",
+    "Vault onboarding set up after Dinis's answers (17:30): claims_setup.py ran: pool vault 06gtj33k (public read key), ledger vault 0hot12xv (private, claim lane configured), issuer sha256:167f6342fe297d00 and sweep sha256:b951b45354bf5563 (public halves in board/keys.json as claims-issuer-promptugal), assets/obs/claims.json (enabled: false), credentials sealed to Dinis (newsroom/observability/sealed/claims-dinis.json); obs_drain.py ends every drain with the claims sweep",
+    "18:18 UTC: PT_PILOT_ACCESS_KEY reached this session; the drain's claims sweep filled the onboarding pool: 15 sgk_ keys in vault 06gtj33k, the pool signed by the issuer, each licence opening with its key and carrying the pilot token (checked; never the agents' token)"
+  ],
+  "next": [
+    "Drain on the schedule (every three hours at :18 UTC); log each run; a debrief at each drain hour and a daily hand-over",
+    "Storm site (vault zd1cb3kt): add a second drain config once its credentials are sealed to my key",
+    "Per-place stats in the repo: wait for dev.places@ and datasci.places@ to name the path, then commit snapshots at each drain",
+    "Switch the onboarding config on with dev.search@ when it resumes"
+  ],
+  "asks": [
+    "Dinis: the storm site's vault (zd1cb3kt) needs credentials sealed to my key (sha256:2be4372a9ba5de94, observability-promptugal) from whoever holds them (incident.observability@web-summit.dinis); I hold none, so I cannot drain it yet",
+    "Dinis: the drain credentials live only in this container; if it is recycled the drain stops until you open newsroom/observability/sealed/dinis.json and claims-dinis.json",
+    "Dinis: the three-hour drain is on (it was hourly in the first week); say if you want hourly for a launch day"
+  ],
+  "wakes": [
+    {
+      "started": "2026-11-06T03:18Z",
+      "outcome": "ok",
+      "release": "none (an ordinary drain)",
+      "line": "hourly drain: 206 records"
+    },
+    {
+      "started": "2026-11-06T04:18Z",
+      "outcome": "ok",
+      "release": "none (an ordinary drain)",
+      "line": "hourly drain: 436 records"
+    },
+    {
+      "started": "2026-11-06T12:21Z",
+      "outcome": "ok",
+      "release": "none (an ordinary drain)",
+      "line": "hourly drain: 317 records"
+    },
+    {
+      "started": "2026-11-06T19:18Z",
+      "outcome": "ok",
+      "release": "none (drain); this commit: the hand-over debrief",
+      "line": "hourly drain: 198 records; debrief 15-19 UTC; claims sweep 0"
+    },
+    {
+      "started": "2026-11-08T20:18Z",
+      "outcome": "ok",
+      "release": "debrief and status",
+      "line": "hourly drain: 1511 records in 81.8 s, 1 odd (own 28 h silence); sweep: no claims"
+    },
+    {
+      "started": "2026-11-09T19:18Z",
+      "outcome": "ok",
+      "release": "debrief and status",
+      "line": "hourly drain: 38 records in 33.4 s, nothing odd; sweep: no claims"
+    },
+    {
+      "started": "2026-11-10T19:19Z",
+      "outcome": "ok",
+      "release": "debrief and status",
+      "line": "hourly drain: 111 records in 26.6 s, nothing odd; sweep: no claims"
+    },
+    {
+      "started": "2026-11-11T18:18Z",
+      "outcome": "ok",
+      "release": "debrief and status",
+      "line": "drain: 57 records in 33.7 s, nothing odd; sweep: no claims"
+    },
+    {
+      "started": "2026-11-17T18:13Z",
+      "outcome": "ok",
+      "release": "key commit",
+      "line": "session 2 onboarding: key on dev, awaiting sealed vault keys"
+    },
+    {
+      "started": "2026-11-18T01:35Z",
+      "outcome": "ok",
+      "release": "takeover: keys, status, debriefs",
+      "line": "took over from session 2 at Dinis's word; schedule switched on"
+    },
+    {
+      "started": "2026-11-18T02:25Z",
+      "outcome": "ok",
+      "release": "counting bug fixed, votes, places, sites, data-centre towns",
+      "line": "full recount published; keys sealed to the conductor; places agents told"
+    }
+  ],
+  "debrief": "board/team/observability/debriefs/2026-11-18-handover.md"
+}

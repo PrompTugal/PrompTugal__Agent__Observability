@@ -1,0 +1,608 @@
+#!/usr/bin/env python3
+"""LETS for PrompTugal.news's observability vaults: copied on 6 November 2026 by observability@PrompTugal.dinis from the
+team site's admin/tools/obs_lets.py (SGit-AI/SGit-AI__Website__Web-Summit, by observability@web-summit.dinis), so both
+public vaults hold the same files and /newsroom/observability/ reads them alike. Changed here: the vault names, this
+site's host, and the reading checklist (EXPECT: this repository's CLAUDE.md, BRIEF.md, BRIEF-CORRECTIONS.md,
+REALITY.md and the board). Its own docstring follows.
+
+LETS for the observability vaults (observability@web-summit.dinis, 5 November 2026, at Dinis Cruz's word): Load,
+Extract, Transform, Save. The drain (obs_drain.py) Loads the lanes and Extracts (opens, verifies) each record; this file
+Saves the raw rows by the hour they happened in, and Transforms each hour once into small, pre-computed JSON, so a page
+loads one file and gets everything, already massaged.
+
+The private data vault (here o0x20qag; on the team site kuuqr3do):
+    events/<YYYY-MM-DD>/<HH>/events.jsonl   every opened record, by the hour it happened (a page event's ts, a run's run)
+    inbox/*.jsonl                            records drained by a browser (Dinis's, /observability/), folded in here
+    state/sessions.json                      each tab's group, kept across hours (declared signals first, then inferred)
+
+The public vault (here 34jzubyc; on the team site aym98gsm; read key published), no anonymous row in any file:
+    <YYYY-MM-DD>/<HH>/hour.json   one hour: totals per group, pages, the team's reads, referrer hosts, screens, the
+                                  agents' runs (whole records: they carry no secrets)
+    <YYYY-MM-DD>/day.json         the day: the same, summed, plus its 24 hours per group
+    latest/summary.json           all time: totals, days, the last 48 hours, top pages and agents (the home page's file)
+    latest/pages.json             every page: views per group, reads, time, scroll, its days
+    latest/agents.json            every agent: runs, reads (md, html, repo), what it read, what it did, last run
+    latest/team.json              every person: what they read, when, how long
+    latest/runs.json              the latest 200 agent runs
+    latest/index.json             which days and hours exist, and when each was computed
+An hour is transformed again only when new records for it arrive (a late drain), or while it is the current hour; a
+finished hour is computed once. Its day and latest/ are then recomputed from the hour files, never from raw rows.
+"""
+import collections, json, os, time
+
+SITE = 'promptugal.news'
+CITY_MIN = 5
+GROUPS = ['readers', 'team', 'synthetic', 'crawlers']
+CRAWLERS = {'googlebot', 'bingbot', 'bot'}
+# Cloud and data-centre towns (Dinis, 18 November 2026: "cloud data center towns as synthetic, especially if you can correlate
+# them"): a tab whose own place lookup says one of these is automation, not a reader. The correlation is published in
+# latest/datacentre.json, per town: how many of its tabs share one browser fingerprint (the Pacific time zone, en-US, a
+# desktop screen, no referrer, one page, a few seconds), which no real reader group does.
+DC_TOWNS = {'Boydton', 'Des Moines', 'Oak Hill', 'Cupertino', 'Ashburn', 'Council Bluffs', 'The Dalles', 'Quincy', 'Manassas',
+            'Chase City', 'Reston', 'Prineville', 'Boardman', 'Moncks Corner', 'Lenoir', 'Santa Clara'}
+
+def norm(path):
+    """/x/index.html and /x/ are one page."""
+    path = str(path or '/')
+    return path[:-len('index.html')] if path.endswith('/index.html') else path
+
+def kind(u, said=''):
+    """What an agent read: md, html, or file (a script, JSON, an image), by the URL's own extension."""
+    u = str(u).split('?')[0]
+    if u.endswith(('.md', 'llms.txt', 'llms-full.txt')): return 'md'
+    if u.endswith(('.html', '.htm', '/')) or (u.startswith('http') and '.' not in u.rsplit('/', 1)[-1]): return 'html'
+    return 'file' if '.' in u.rsplit('/', 1)[-1] else (said or 'html')
+
+def hour_of(r):
+    t = str(r.get('ts') or r.get('run') or '')
+    if len(t) >= 13: return t[:10], t[11:13]
+    if r.get('_received'): g = time.gmtime(r['_received'] / 1000); return time.strftime('%Y-%m-%d', g), time.strftime('%H', g)
+    return None
+
+def jload(p, default):
+    try: return json.load(open(p))
+    except Exception: return default
+
+def jsave(p, obj):
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, 'w') as f: json.dump(obj, f, indent=1, sort_keys=True)
+
+# ---------------------------------------------------------------- save (raw, private)
+def fix_clock(r):
+    """A browser's clock is a claim: a test can set it to another day (5 November: a headless test of a command centre
+    ran at 2026-11-10). When the claimed time is more than 6 hours from when the lane received the record, the record
+    is filed by the time it was received, and the claim is kept as ts_claimed."""
+    t, rcv = r.get('ts') or r.get('run'), r.get('_received')
+    if not t or not rcv or len(str(t)) < 16: return r
+    try: claimed = time.mktime(time.strptime(str(t)[:16], '%Y-%m-%dT%H:%M')) - time.mktime(time.gmtime(0))
+    except ValueError: return r
+    if abs(claimed - rcv / 1000) > 6 * 3600:
+        key = 'ts' if r.get('ts') else 'run'
+        r[key + '_claimed'] = r[key]; r[key] = time.strftime('%Y-%m-%dT%H:%MZ', time.gmtime(rcv / 1000))
+    return r
+
+def save_raw(vault, rows):
+    """Append rows to events/<day>/<hour>/events.jsonl, once each (by _file). Returns the set of hours touched."""
+    touched, by = set(), collections.defaultdict(list)
+    for r in rows:
+        fix_clock(r)
+        if r.get('test') or r.get('v') != 1: continue
+        h = hour_of(r)
+        if h: by[h].append(r)
+    for (day, hh), rs in by.items():
+        p = os.path.join(vault, 'events', day, hh, 'events.jsonl'); os.makedirs(os.path.dirname(p), exist_ok=True)
+        seen = {json.loads(l).get('_file') for l in open(p) if l.strip()} if os.path.exists(p) else set()
+        new = [r for r in rs if r.get('_file') not in seen]
+        if new:
+            with open(p, 'a') as f:
+                for r in new: f.write(json.dumps(r, sort_keys=True) + '\n')
+            touched.add((day, hh))
+    return touched
+
+def migrate(vault):
+    """Once: the first layout (drain/<date>.jsonl, reports/) into events/<day>/<hour>/."""
+    old = os.path.join(vault, 'drain')
+    if not os.path.isdir(old): return set()
+    rows = [json.loads(l) for n in sorted(os.listdir(old)) if n.endswith('.jsonl') for l in open(os.path.join(old, n)) if l.strip()]
+    touched = save_raw(vault, rows)
+    for d in ('drain', 'reports'):
+        p = os.path.join(vault, d)
+        if os.path.isdir(p):
+            for n in os.listdir(p): os.remove(os.path.join(p, n))
+            os.rmdir(p)
+    return touched
+
+DRAINS = []                                                              # this run's drains, for state/drains.json
+
+def fold_inbox(vault, extract):
+    """Records a browser drained (inbox/*.jsonl: {file_id, lane, content}, still sealed) are opened and verified here by
+    extract(content), exactly as the lanes' are, go into events/, and the inbox file is removed."""
+    p = os.path.join(vault, 'inbox')
+    if not os.path.isdir(p): return set(), 0
+    touched, n = set(), 0
+    for name in sorted(os.listdir(p)):
+        if not name.endswith('.jsonl'): continue
+        rows, meta = [], {}
+        for l in open(os.path.join(p, name)):
+            if not l.strip(): continue
+            x = json.loads(l)
+            if 'meta' in x: meta = x['meta']; continue                    # the browser's own timings
+            ev = extract(x['content'])
+            ev.update(_file=x['file_id'], _lane=x.get('lane', 0), _via='browser:' + name,
+                      _received=int(x['file_id'][:13]) if str(x['file_id'])[:13].isdigit() else None)
+            rows.append(ev)
+        touched |= save_raw(vault, rows); n += len(rows)
+        parts = name[:-6].split('-')                                       # browser-<person>-<ISO stamp>.jsonl
+        who = parts[1] if len(parts) > 2 and parts[1].isalpha() else 'browser'
+        stamp = name[len('browser-' + (who + '-' if who != 'browser' else '')):-6]
+        at = (stamp[:10] + 'T' + stamp[11:13] + ':' + stamp[14:16] + 'Z') if len(stamp) >= 16 else ''
+        DRAINS.append({'at': at, 'by': who, 'records': len(rows), 'via': 'browser', **{k: meta[k] for k in ('secs', 'phases', 'lanes', 'lane_count') if k in meta}})
+        os.remove(os.path.join(p, name))
+    return touched, n
+
+def hour_rows(vault, day, hh):
+    p = os.path.join(vault, 'events', day, hh, 'events.jsonl')
+    return [json.loads(l) for l in open(p) if l.strip()] if os.path.exists(p) else []
+
+def all_hours(vault):
+    base = os.path.join(vault, 'events')
+    if not os.path.isdir(base): return []
+    return sorted((d, h) for d in os.listdir(base) for h in os.listdir(os.path.join(base, d)))
+
+# ---------------------------------------------------------------- the groups (a tab's group, kept across hours)
+def update_sessions(vault, rows):
+    # Rebuilt from the rows each time (18 November 2026, observability@PrompTugal.dinis): transform() passes ALL rows on every
+    # drain, and this used to add to the saved counts, so each tab's views grew by its true views at every drain; after about
+    # 40 drains every old tab passed the "more than 40 views" line and a recount classed it a crawler (stored views were 10 to
+    # 100 times the real ones). The raw records were never touched.
+    st = {}
+    for r in rows:
+        if r.get('type') not in ('view', 'read') or not r.get('sid'): continue
+        s = st.setdefault(r['sid'], {'first': r.get('ts', ''), 'tz': r.get('tz', ''), 'lang': r.get('lang', ''), 'agents': [], 'verified': False, 'views': 0})
+        if str(r.get('ts', '')) < s['first']: s.update(first=r.get('ts', ''), tz=r.get('tz', ''), lang=r.get('lang', ''))
+        if r.get('agent') and r['agent'] not in s['agents']: s['agents'].append(r['agent'])
+        if r.get('city') and not s.get('city'): s['city'] = r['city']         # the tab's own place lookup, kept to class data-centre towns
+        if r.get('verified'): s['verified'] = True
+        if r.get('type') == 'view': s['views'] += 1
+    for s in st.values():
+        a = set(s['agents'])
+        s['group'] = ('crawlers' if a & CRAWLERS else 'synthetic' if a & {'webdriver', 'headless'} else 'team' if s['verified']
+                      else 'crawlers' if s['views'] > 40 else 'synthetic' if s['tz'] in ('UTC', 'Etc/UTC', '') or str(s['lang']).endswith('@posix')
+                      or s.get('city') in DC_TOWNS else 'readers')
+    jsave(os.path.join(vault, 'state', 'sessions.json'), st)
+    return {k: v['group'] for k, v in st.items()}
+
+# ---------------------------------------------------------------- transform (public)
+def zero(): return {g: 0 for g in GROUPS}
+
+def hour_stats(day, hh, rows, groups):
+    pages, seen = [], set()
+    for r in rows:                                                       # a read re-sent from the next page can arrive twice
+        if r.get('type') not in ('view', 'read') or not r.get('path'): continue
+        k = (r.get('sid'), r.get('type'), r.get('path'), r.get('ts'), r.get('visible_s'), r.get('scroll'), r.get('src'))
+        if r.get('type') == 'read' and k in seen: continue
+        seen.add(k); pages.append(r)
+    runs = sorted([r for r in rows if r.get('type') == 'web-summit.agent-run/v1'], key=lambda r: r.get('run', ''))
+    totals = {g: {'views': 0, 'reads': 0, 'tabs': 0} for g in GROUPS}
+    tabs = collections.defaultdict(set)
+    P = collections.defaultdict(lambda: {'views': zero(), 'reads': 0, 'visible_s': 0, 'scroll_sum': 0})
+    T = collections.defaultdict(lambda: {'views': 0, 'reads': 0, 'visible_s': 0, 'max_scroll': 0, 'last': ''})
+    refs, screens = collections.Counter(), collections.Counter()
+    for r in pages:
+        g = groups.get(r.get('sid'), 'readers'); tabs[g].add(r.get('sid'))
+        p = P[norm(r['path'])]
+        if r['type'] == 'view':
+            totals[g]['views'] += 1; p['views'][g] += 1
+            if r.get('ref') and r['ref'] not in (SITE,): refs[r['ref']] += 1
+            screens[r.get('screen', '')] += 1
+        else:
+            totals[g]['reads'] += 1; p['reads'] += 1; p['visible_s'] += r.get('visible_s', 0); p['scroll_sum'] += r.get('scroll', 0)
+        if r.get('verified') and r.get('person'):
+            t = T[(r['person'], norm(r['path']))]; t['last'] = max(t['last'], str(r.get('ts', '')))
+            if r['type'] == 'view': t['views'] += 1
+            else: t['reads'] += 1; t['visible_s'] += r.get('visible_s', 0); t['max_scroll'] = max(t['max_scroll'], r.get('scroll', 0))
+    for g in GROUPS: totals[g]['tabs'] = len(tabs[g])
+    M = collections.defaultdict(zero)
+    for r in pages:
+        if r['type'] == 'view': M[str(r.get('ts', ''))[14:16]][groups.get(r.get('sid'), 'readers')] += 1
+    keep = ('agent', 'run', 'trigger', 'repo', 'read', 'did', 'tokens', 'notes', 'signed', 'key_id', 'sig_finding')
+    return {'v': 1, 'day': day, 'hour': hh, 'computed': time.strftime('%Y-%m-%dT%H:%MZ', time.gmtime()),
+            'totals': totals,
+            'pages': [{'path': k, **v} for k, v in sorted(P.items())],
+            'team': [{'person': p, 'path': path, **v} for (p, path), v in sorted(T.items())],
+            'referrers': refs.most_common(), 'screens': screens.most_common(),
+            'minutes': sorted([m, v] for m, v in M.items() if m),
+            'runs': [{k: r[k] for k in keep if k in r} for r in runs],
+            'findings': {'page_signatures': sum(1 for r in pages if r.get('sig_finding')), 'agent_signatures': sum(1 for r in runs if r.get('sig_finding'))}}
+
+def merge(stats_list, extra=None):
+    """Sum hour (or day) stats into one."""
+    out = {'totals': {g: {'views': 0, 'reads': 0, 'tabs': 0} for g in GROUPS}, 'pages': {}, 'team': {}, 'referrers': collections.Counter(),
+           'screens': collections.Counter(), 'runs': [], 'findings': {'page_signatures': 0, 'agent_signatures': 0}}
+    for s in stats_list:
+        for g in GROUPS:
+            for k in ('views', 'reads', 'tabs'): out['totals'][g][k] += s['totals'][g][k]
+        for p in s['pages']:
+            q = out['pages'].setdefault(p['path'], {'path': p['path'], 'views': zero(), 'reads': 0, 'visible_s': 0, 'scroll_sum': 0})
+            for g in GROUPS: q['views'][g] += p['views'][g]
+            for k in ('reads', 'visible_s', 'scroll_sum'): q[k] += p[k]
+        for t in s['team']:
+            q = out['team'].setdefault((t['person'], t['path']), {'person': t['person'], 'path': t['path'], 'views': 0, 'reads': 0, 'visible_s': 0, 'max_scroll': 0, 'last': ''})
+            for k in ('views', 'reads', 'visible_s'): q[k] += t[k]
+            q['max_scroll'] = max(q['max_scroll'], t['max_scroll']); q['last'] = max(q['last'], t['last'])
+        out['referrers'].update(dict(s['referrers'])); out['screens'].update(dict(s['screens'])); out['runs'] += s['runs']
+        for k in out['findings']: out['findings'][k] += s['findings'][k]
+    out['pages'] = sorted(out['pages'].values(), key=lambda p: -sum(p['views'].values()))
+    out['team'] = sorted(out['team'].values(), key=lambda t: t['last'], reverse=True)
+    out['referrers'] = out['referrers'].most_common(); out['screens'] = out['screens'].most_common()
+    out['runs'] = sorted(out['runs'], key=lambda r: r.get('run', ''), reverse=True)
+    return {**out, **(extra or {})}
+
+EXPECT = {'claude_md': lambda u: u.endswith('CLAUDE.md'), 'brief': lambda u: u.endswith('BRIEF.md') or '/brief/' in u,
+          'corrections': lambda u: u.endswith('BRIEF-CORRECTIONS.md'), 'reality': lambda u: u.endswith('REALITY.md'),
+          'board': lambda u: '/briefs/' in u or 'board/' in u}
+
+def agents_of(runs):
+    A = {}
+    for r in sorted(runs, key=lambda r: r.get('run', '')):
+        a = A.setdefault(r.get('agent', '?'), {'agent': r.get('agent', '?'), 'runs': 0, 'signed': 0, 'read_md': 0, 'read_html': 0, 'read_repo': 0,
+                                               'read_file': 0, 'did': 0, 'first': r.get('run', ''), 'last': '', 'triggers': collections.Counter(), 'reads': {}, 'done': [], 'tokens': 0, '_seen': set(), 'acted_blind': 0})
+        a['runs'] += 1; a['signed'] += 1 if r.get('signed') else 0; a['last'] = r.get('run', ''); a['triggers'][r.get('trigger', '')] += 1
+        t = r.get('tokens') or {}; a['tokens'] += sum(v for v in t.values() if isinstance(v, (int, float)))
+        for x in r.get('read', []):
+            u = str(x.get('url', '')); k = kind(u[5:] if u.startswith('repo:') else u, x.get('as', ''))
+            a['read_repo' if u.startswith('repo:') else 'read_md' if k == 'md' else 'read_html' if k == 'html' else 'read_file'] += 1
+            e = a['reads'].setdefault(u, {'url': u, 'as': 'repo' if u.startswith('repo:') else k, 'times': 0, 'first': r.get('run', ''), 'last': ''}); e['times'] += 1; e['last'] = r.get('run', '')
+        for x in r.get('did', []):
+            if str(x.get('subject', '')).startswith('site v'): continue                 # CI's release commit, not the agent's
+            key = x.get('commit') or x.get('release') or x.get('file') or x.get('message_to') or x.get('note')
+            if key in a['_seen']: continue
+            a['_seen'].add(key); a['did'] += 1; a['done'].append({**x, 'run': r.get('run', '')})
+        a['acted_blind'] += 1 if (r.get('did') and not any('board/' in str(x.get('url', '')) or '/briefs/' in str(x.get('url', '')) or '/inbox/' in str(x.get('url', '')) for x in r.get('read', []))) else 0
+    out = []
+    for a in A.values():
+        urls = list(a['reads'])
+        a['checklist'] = {k: any(f(u) for u in urls) for k, f in EXPECT.items()}
+        a['reads'] = sorted(a['reads'].values(), key=lambda e: (-e['times'], e['url']))[:300]
+        a['done'] = a['done'][-100:][::-1]; a['triggers'] = dict(a['triggers']); a.pop('_seen')
+        out.append(a)
+    return sorted(out, key=lambda a: a['last'], reverse=True)
+
+def save_drains(data_vault, pub_vault, entry):
+    """Add one drain (when, by whom, how many, how long, each phase, each lane's pending count) to the log."""
+    dl = jload(os.path.join(data_vault, 'state', 'drains.json'), []) + [entry]
+    jsave(os.path.join(data_vault, 'state', 'drains.json'), dl[-1000:])
+    jsave(os.path.join(pub_vault, 'latest', 'drains.json'), {'v': 1, 'generated': entry['at'], 'drains': dl[-200:][::-1]})
+
+# ---------------------------------------------------------------- sites, votes, places, data-centre towns (counts only)
+def site_class(site):
+    """web: this site; ios: the iPhone app (its site field starts ios.app.); test: anything else (a local build or a preview)."""
+    s = str(site or '')
+    return 'web' if s == SITE else 'ios' if s.startswith('ios.app.') else 'test'
+
+def place_of(path):
+    """/algarve/ and its own pages (costs, api, newsroom) are 'algarve'; /algarve/<town>/... is that town; /portugal/... is 'portugal'."""
+    parts = [x for x in norm(str(path).split('#')[0].split('?')[0]).split('/') if x]
+    if not parts: return None
+    if parts[0] == 'algarve': return parts[1] if len(parts) > 1 and parts[1] not in ('api', 'costs', 'newsroom') else 'algarve'
+    return 'portugal' if parts[0] == 'portugal' else None
+
+def place_path(pid): return '/algarve/' if pid == 'algarve' else '/portugal/' if pid == 'portugal' else f'/algarve/{pid}/'
+
+def vote_of(r):
+    v = r.get('vote')
+    return 1 if v in (1, '1', '+1', 'up') else -1 if v in (-1, '-1', 'down') else 0
+
+def extras(data_vault, pub_vault, hours, groups, gen):
+    """The counts Dinis asked for on 18 November 2026: every site that sends (his local test builds stay visible), anonymous thumbs
+    (type 'vote', +1 or -1, per page and place, web and iOS app apart), per-place stats (readers on this site only) and the evidence
+    for classing data-centre towns as synthetic. Counts only: no tab id, no time finer than the day, nothing that names a reader."""
+    import statistics
+    L = os.path.join(pub_vault, 'latest')
+    sites = collections.defaultdict(lambda: {'tabs': set(), 'views': zero(), 'reads': 0, 'first': '', 'last': ''})
+    V = {'by_class': collections.defaultdict(lambda: {'up': 0, 'down': 0}), 'pages': collections.defaultdict(lambda: collections.defaultdict(lambda: {'up': 0, 'down': 0})),
+         'stories': collections.defaultdict(lambda: {'up': 0, 'down': 0}), 'days': collections.defaultdict(lambda: collections.defaultdict(lambda: {'up': 0, 'down': 0}))}
+    seen_v, seen_r = set(), set()
+    seqs = collections.defaultdict(list)                                    # production readers: tab -> [(ts, path)]
+    PV = collections.defaultdict(lambda: {'views': 0, 'reads': 0, 'visible_s': 0, 'tabs': set(), 'pages': collections.Counter(), 'flows': collections.Counter(),
+                                          'votes': collections.defaultdict(lambda: {'up': 0, 'down': 0}), 'vote_pages': collections.Counter()})
+    tabs = {}
+    for day, hh in hours:
+        for r in hour_rows(data_vault, day, hh):
+            t = r.get('type'); sid = r.get('sid'); ts = str(r.get('ts', ''))
+            if t == 'vote':
+                v = vote_of(r); on = str(r.get('voted_on') or '')
+                if not v or not on: continue
+                k = (ts, on, v, r.get('site'), sid)
+                if k in seen_v: continue
+                seen_v.add(k)
+                page, _, story = on.partition('#'); cls = site_class(r.get('site')); d = 'up' if v > 0 else 'down'
+                V['by_class'][cls][d] += 1; V['pages'][norm(page)][cls][d] += 1; V['days'][ts[:10]][cls][d] += 1
+                if story: V['stories'][story[:300]][d] += 1
+                pl = place_of(page)
+                if pl: PV[pl]['votes'][cls][d] += 1; PV[pl]['vote_pages'][norm(page)] += 1
+                continue
+            if t not in ('view', 'read') or not r.get('path') or not sid: continue
+            if t == 'read':
+                k = (sid, t, r.get('path'), ts, r.get('visible_s'), r.get('scroll'), r.get('src'))
+                if k in seen_r: continue
+                seen_r.add(k)
+            g = groups.get(sid, 'readers'); cls = site_class(r.get('site')); path = norm(r['path'])
+            S = sites[str(r.get('site') or '(none)')]; S['tabs'].add(sid); S['first'] = min([x for x in (S['first'], ts) if x] or ['']); S['last'] = max(S['last'], ts)
+            if t == 'view': S['views'][g] += 1
+            else: S['reads'] += 1
+            tb = tabs.setdefault(sid, {'city': r.get('city', ''), 'tz': r.get('tz', ''), 'lang': r.get('lang', ''), 'screen': r.get('screen', ''), 'ref': False, 'views': 0, 'vis': []})
+            if t == 'view':
+                tb['views'] += 1; tb['ref'] = tb['ref'] or bool(r.get('ref') and r['ref'] != SITE)
+            else: tb['vis'].append(r.get('visible_s', 0))
+            if cls == 'web' and g == 'readers':
+                pl = place_of(path)
+                if t == 'view':
+                    seqs[sid].append((ts, path))
+                    if pl: PV[pl]['views'] += 1; PV[pl]['tabs'].add(sid); PV[pl]['pages'][path] += 1
+                elif pl: PV[pl]['reads'] += 1; PV[pl]['visible_s'] += r.get('visible_s', 0)
+    for sid, seq in seqs.items():                                           # the flow between pages, from one tab's consecutive views
+        seq.sort(key=lambda x: x[0])
+        for (_, a), (_, b) in zip(seq, seq[1:]):
+            if a == b: continue
+            for pl in {place_of(a), place_of(b)} - {None}: PV[pl]['flows'][(a, b)] += 1
+    jsave(os.path.join(L, 'sites.json'), {'v': 1, 'generated': gen,
+        'about': 'Every site that sends to this lane, by the host its browser reports. promptugal.news is the site; ios.app.* is the iPhone app; anything else (localhost:..., a preview) is a test build, kept visible on purpose (Dinis, 18 November 2026). Counts only.',
+        'sites': sorted([{'site': k, 'class': site_class(k), 'tabs': len(v['tabs']), 'views': v['views'], 'reads': v['reads'], 'first': v['first'], 'last': v['last']} for k, v in sites.items()],
+                        key=lambda s: -sum(s['views'].values()))})
+    jsave(os.path.join(L, 'votes.json'), {'v': 1, 'generated': gen,
+        'about': 'Anonymous thumbs (type vote, +1 or -1): no person, no key, no tab id. web is promptugal.news, ios the iPhone app (site ios.app.*), test any other host. A story vote carries its source URL after #.',
+        'totals': V['by_class'], 'days': V['days'], 'pages': [{'page': p, **c} for p, c in sorted(V['pages'].items(), key=lambda x: -sum(sum(y.values()) for y in x[1].values()))[:100]],
+        'stories': [{'story': s, **c} for s, c in sorted(V['stories'].items(), key=lambda x: -(x[1]['up'] + x[1]['down']))[:100]]})
+    places = {}
+    for pid, p in PV.items():
+        places[pid] = {'id': pid, 'path': place_path(pid), 'generated': gen, 'scope': 'readers on promptugal.news only; votes by class (web, ios, test)',
+                       'tabs': len(p['tabs']), 'views': p['views'], 'reads': p['reads'], 'read_s_avg': round(p['visible_s'] / p['reads']) if p['reads'] else 0,
+                       'pages': [[a, n] for a, n in p['pages'].most_common(20)], 'flows': [[a, b, n] for (a, b), n in p['flows'].most_common(20)],
+                       'votes': {c: dict(v) for c, v in p['votes'].items()}, 'vote_pages': [[a, n] for a, n in p['vote_pages'].most_common(20)]}
+        jsave(os.path.join(L, 'places', pid + '.json'), places[pid])
+    jsave(os.path.join(L, 'places-stats.json'), {'v': 1, 'generated': gen, 'about': 'Per place (/portugal/, /algarve/ and each /algarve/<town>/): readers, reads, the pages opened, the flow between pages, and anonymous thumbs. Counts only.',
+                                                  'places': places})
+    dc = collections.defaultdict(lambda: {'tabs': 0, 'tz_la': 0, 'en_us': 0, 'desktop': 0, 'no_referrer': 0, 'one_page': 0, 'vis': [], 'groups': collections.Counter()})
+    for sid, tb in tabs.items():
+        if tb['city'] not in DC_TOWNS: continue
+        c = dc[tb['city']]; c['tabs'] += 1; c['groups'][groups.get(sid, 'readers')] += 1
+        c['tz_la'] += tb['tz'] == 'America/Los_Angeles'; c['en_us'] += tb['lang'] == 'en-US'; c['desktop'] += tb['screen'] == 'desktop'
+        c['no_referrer'] += not tb['ref']; c['one_page'] += tb['views'] <= 1; c['vis'] += tb['vis']
+    jsave(os.path.join(L, 'datacentre.json'), {'v': 1, 'generated': gen,
+        'rule': 'A tab whose own place lookup names one of these cloud and data-centre towns is classed synthetic. The correlation below: the share of each town\'s tabs with the same fingerprint (Pacific time zone, en-US, desktop screen, no referrer, one page), which the real reader groups do not show.',
+        'towns_listed': sorted(DC_TOWNS),
+        'towns': [{'town': k, 'tabs': c['tabs'], 'groups': dict(c['groups']), 'same_fingerprint': {'tz_los_angeles': c['tz_la'], 'en_us': c['en_us'], 'desktop': c['desktop'], 'no_referrer': c['no_referrer'], 'one_page': c['one_page']},
+                   'median_visible_s': statistics.median(c['vis']) if c['vis'] else None} for k, c in sorted(dc.items(), key=lambda x: -x[1]['tabs'])]})
+
+def transform(data_vault, pub_vault, dirty, now_hour, roster=()):
+    """Recompute the dirty hours (and the current hour), their days, and latest/. Returns what was computed."""
+    groups = update_sessions(data_vault, [r for d, h in all_hours(data_vault) for r in hour_rows(data_vault, d, h)]) if dirty else \
+        {k: v['group'] for k, v in jload(os.path.join(data_vault, 'state', 'sessions.json'), {}).items()}
+    hours = all_hours(data_vault)
+    idx = jload(os.path.join(pub_vault, 'latest', 'index.json'), {'hours': {}})
+    todo = {h for h in hours if h in dirty or h == now_hour or f'{h[0]}/{h[1]}' not in idx['hours']}
+    for day, hh in sorted(todo):
+        jsave(os.path.join(pub_vault, day, hh, 'hour.json'), hour_stats(day, hh, hour_rows(data_vault, day, hh), groups))
+        idx['hours'][f'{day}/{hh}'] = time.strftime('%Y-%m-%dT%H:%MZ', time.gmtime())
+    days = sorted({d for d, _ in hours}); dirty_days = {d for d, _ in todo}
+    for day in days:
+        if day not in dirty_days and os.path.exists(os.path.join(pub_vault, day, 'day.json')): continue
+        hs = [jload(os.path.join(pub_vault, day, h, 'hour.json'), None) for h in sorted(os.listdir(os.path.join(pub_vault, day))) if h.isdigit()]
+        hs = [h for h in hs if h]
+        series = [[h['hour'], {g: h['totals'][g]['views'] for g in GROUPS}] for h in hs]
+        th = collections.defaultdict(dict)                                  # the heatmap: person -> hour -> [views, reads, pages]
+        for hr in hs:
+            for t in hr['team']:
+                c = th[t['person']].setdefault(hr['hour'], [0, 0, []]); c[0] += t['views']; c[1] += t['reads']
+                if t['path'] not in c[2] and len(c[2]) < 6: c[2].append(t['path'])
+        jsave(os.path.join(pub_vault, day, 'day.json'), merge(hs, {'v': 1, 'day': day, 'hours': series, 'team_hours': th, 'computed': time.strftime('%Y-%m-%dT%H:%MZ', time.gmtime())}))
+    D = [jload(os.path.join(pub_vault, d, 'day.json'), None) for d in days]; D = [d for d in D if d]
+    allstats = merge(D)
+    last48 = []
+    for day, hh in hours[-48:]:
+        h = jload(os.path.join(pub_vault, day, hh, 'hour.json'), None)
+        if h: last48.append([f'{day}T{hh}', {g: h['totals'][g]['views'] for g in GROUPS}, sum(h['totals'][g]['reads'] for g in GROUPS), len(h['runs'])])
+    agents = agents_of(allstats['runs'])
+    page_days = collections.defaultdict(list)
+    for d in D:
+        for p in d['pages']: page_days[p['path']].append([d['day'], sum(p['views'].values())])
+    pages = [{**p, 'total': sum(p['views'].values()), 'read_s_avg': round(p['visible_s'] / p['reads']) if p['reads'] else 0,
+              'scroll_avg': round(p['scroll_sum'] / p['reads']) if p['reads'] else 0, 'days': page_days[p['path']]} for p in allstats['pages']]
+    people = collections.defaultdict(list)
+    for t in allstats['team']: people[t['person']].append(t)
+    gen = time.strftime('%Y-%m-%dT%H:%MZ', time.gmtime())
+    L = os.path.join(pub_vault, 'latest')
+    jsave(os.path.join(L, 'summary.json'), {'v': 1, 'generated': gen, 'groups': GROUPS, 'totals': allstats['totals'],
+        'days': [[d['day'], {g: d['totals'][g]['views'] for g in GROUPS}, sum(d['totals'][g]['reads'] for g in GROUPS), len(d['runs'])] for d in D],
+        'last48': last48, 'pages': len(pages), 'top_pages': [[p['path'], p['total'], p['views']] for p in pages[:10]],
+        'agents': {'count': len(agents), 'runs': len(allstats['runs']), 'signed': sum(1 for r in allstats['runs'] if r.get('signed')),
+                   'latest': [[r.get('run'), r.get('agent'), len(r.get('read', [])), len(r.get('did', []))] for r in allstats['runs'][:8]]},
+        'team': {'people': len(people), 'views': allstats['totals']['team']['views']},
+        'referrers': allstats['referrers'][:20], 'screens': allstats['screens'], 'findings': allstats['findings'],
+        'about': 'observability@PrompTugal.dinis, newsroom/tools/obs/obs_drain.py + obs_lets.py (the team site\'s, copied): drained from the private vault o0x20qag, transformed by the hour. Anonymous readers are counts only; the team is named only when signed by their site key; every record is an untrusted claim.'})
+    jsave(os.path.join(L, 'pages.json'), {'v': 1, 'generated': gen, 'pages': pages})
+    logged = {a['agent'] for a in agents}
+    for name in roster:                                                    # agents with a key that never logged: silent
+        if name not in logged: agents.append({'agent': name, 'runs': 0, 'signed': 0, 'read_md': 0, 'read_html': 0, 'read_file': 0, 'read_repo': 0, 'did': 0,
+                                              'first': '', 'last': '', 'triggers': {}, 'reads': [], 'done': [], 'tokens': 0, 'acted_blind': 0, 'checklist': {k: False for k in EXPECT}})
+    jsave(os.path.join(L, 'agents.json'), {'v': 1, 'generated': gen, 'expect': list(EXPECT), 'roster': sorted(roster), 'agents': agents})
+    nowt = time.strftime('%Y-%m-%dT%H:%MZ', time.gmtime())
+    def hours_since(t):
+        if not t: return None
+        return round((time.mktime(time.strptime(nowt, '%Y-%m-%dT%H:%MZ')) - time.mktime(time.strptime(t[:16] + 'Z', '%Y-%m-%dT%H:%MZ'))) / 3600, 1)
+    read_index = collections.defaultdict(lambda: {'people': {}, 'agents': {}})
+    for t in allstats['team']: read_index[t['path']]['people'][t['person']] = max(read_index[t['path']]['people'].get(t['person'], ''), t['last'])
+    for a in agents:
+        for e in a['reads']:
+            u = e['url']; u = norm('/' + u.split('://', 1)[1].split('/', 1)[1]) if u.startswith('https://' + SITE + '/') else u
+            u = u[:-len('index.md')] if u.endswith('/index.md') else u
+            read_index[u]['agents'][a['agent']] = max(read_index[u]['agents'].get(a['agent'], ''), e['last'])
+    jsave(os.path.join(L, 'widgets.json'), {'v': 1, 'generated': gen,
+        'silent_24h': sorted(([a['agent'], a['last'], hours_since(a['last'])] for a in agents if not a['last'] or hours_since(a['last']) > 24), key=lambda x: (x[2] is not None, x[2] or 0), reverse=True),
+        'checklist_incomplete': [[a['agent'], [k for k, ok in a['checklist'].items() if not ok]] for a in agents if not all(a['checklist'].values())],
+        'acted_without_board': [[a['agent'], a['acted_blind'], a['runs']] for a in agents if a['acted_blind']],
+        'md_vs_html': [[a['agent'], a['read_md'], a['read_html'], a['read_file'], a['read_repo'], round(a['tokens'] / a['runs']) if a['runs'] else 0] for a in agents if a['runs']],
+        'read_index': read_index})
+    jsave(os.path.join(L, 'team.json'), {'v': 1, 'generated': gen, 'people': {p: rows for p, rows in sorted(people.items())}})
+    # flows: how tabs move from page to page (counts only; a tab's own sequence never leaves the private vault)
+    seqs = collections.defaultdict(list)
+    for d, hh in hours:
+        for r in hour_rows(data_vault, d, hh):
+            if r.get('type') == 'view' and r.get('sid') and r.get('path'): seqs[r['sid']].append((str(r.get('ts', '')), norm(r['path'])))
+    edges, entries = collections.Counter(), collections.Counter()
+    for sid, seq in seqs.items():
+        seq.sort(); g = groups.get(sid, 'readers')
+        entries[(seq[0][1], g)] += 1
+        for (_, a), (_, b) in zip(seq, seq[1:]):
+            if a != b: edges[(a, b, g)] += 1
+    jsave(os.path.join(L, 'flows.json'), {'v': 1, 'generated': gen,
+        'edges': [[a, b, g, n] for (a, b, g), n in edges.most_common()],
+        'entries': [[p, g, n] for (p, g), n in entries.most_common()],
+        'about': 'Page to next page within one tab, counted per group. Only counts are published.'})
+    # places (PrompTugal, 6 November, at Dinis's word: the country and city of the browser's own lookup). Counted by
+    # tab, from the private rows: every country; a city or region only once CITY_MIN tabs or more came from it, so a
+    # town with a handful of readers cannot name one of them (the observability pack's rule); the rest is "other".
+    tabs_at = collections.defaultdict(dict)
+    for d, hh in hours:
+        for r in hour_rows(data_vault, d, hh):
+            if r.get('type') == 'view' and r.get('sid'):
+                tabs_at[r['sid']] = {'country': r.get('country') or '', 'cc': r.get('country_code') or '', 'region': r.get('region') or '', 'city': r.get('city') or '', 'g': groups.get(r['sid'], 'readers'),
+                                     'lat': r.get('lat'), 'lon': r.get('lon')}
+    C, R, Y = collections.defaultdict(zero), collections.defaultdict(zero), collections.defaultdict(zero)
+    for t in tabs_at.values():
+        C[(t['cc'], t['country'] or 'unknown')][t['g']] += 1
+        if t['region']: R[(t['cc'], t['region'])][t['g']] += 1
+        if t['city']: Y[(t['cc'], t['city'])][t['g']] += 1
+    def floor(D):
+        out, other = [], zero()
+        for (cc, n), v in sorted(D.items(), key=lambda x: -sum(x[1].values())):
+            if sum(v.values()) >= CITY_MIN: out.append([cc, n, v])
+            else:
+                for g in GROUPS: other[g] += v[g]
+        return out, other
+    cities, c_other = floor(Y); regions, r_other = floor(R)
+    # where on the map: each shown city's position (the mean of its tabs', already rounded to 0.1 degree in the browser)
+    pos = collections.defaultdict(list)
+    for t in tabs_at.values():
+        if t['city'] and isinstance(t.get('lat'), (int, float)) and isinstance(t.get('lon'), (int, float)): pos[(t['cc'], t['city'])].append((t['lat'], t['lon']))
+    for c in cities:
+        ps = pos.get((c[0], c[1]))
+        if ps: c.append([round(sum(p[0] for p in ps) / len(ps), 1), round(sum(p[1] for p in ps) / len(ps), 1)])
+    # links (Dinis, 6 November: "I just sent a link to somebody ... see if they open it ... and if they forward it"): every
+    # tab that arrived with a tag (?via=, utm_campaign or utm_source), counted per tag: tabs, views, reads, the pages read,
+    # the countries, how many different cities (a number, never which), the referring sites, first and last seen. One tab
+    # is one open; more tabs, from more places, is the link travelling.
+    L_ = collections.defaultdict(lambda: {'tabs': set(), 'views': 0, 'reads': 0, 'visible_s': 0, 'pages': collections.Counter(), 'countries': collections.Counter(),
+                                          'cities': set(), 'refs': collections.Counter(), 'groups': collections.Counter(), 'first': '', 'last': ''})
+    seen_tab = set()
+    for d, hh in hours:
+        for r in hour_rows(data_vault, d, hh):
+            v = r.get('via')
+            if not v or r.get('type') not in ('view', 'read') or not r.get('path'): continue
+            x = L_[v]; ts = str(r.get('ts', '')); sid = r.get('sid')
+            if (v, sid) not in seen_tab:
+                seen_tab.add((v, sid)); x['tabs'].add(sid); x['countries'][r.get('country') or 'unknown'] += 1; x['groups'][groups.get(sid, 'readers')] += 1
+                if r.get('city'): x['cities'].add((r.get('country_code'), r.get('city')))
+            if r['type'] == 'view':
+                x['views'] += 1; x['pages'][norm(r['path'])] += 1
+                if r.get('ref') and r['ref'] != SITE: x['refs'][r['ref']] += 1
+            else: x['reads'] += 1; x['visible_s'] += r.get('visible_s', 0)
+            x['first'] = min(x['first'] or ts, ts); x['last'] = max(x['last'], ts)
+    jsave(os.path.join(L, 'links.json'), {'v': 1, 'generated': gen, 'links': sorted(({'via': k, 'tabs': len(x['tabs']), 'views': x['views'], 'reads': x['reads'], 'visible_s': x['visible_s'],
+        'pages': x['pages'].most_common(20), 'countries': x['countries'].most_common(), 'cities': len(x['cities']), 'refs': x['refs'].most_common(10), 'groups': dict(x['groups']),
+        'first': x['first'], 'last': x['last']} for k, x in L_.items()), key=lambda e: e['last'], reverse=True),
+        'about': 'Tabs that arrived on a tagged link (?via=<tag>, or utm_campaign / utm_source), per tag. One tab is one open; more tabs from more countries and cities is the link being passed on. Counts only: the number of different cities, never which.'})
+    # reading depth per page, and per page variant for A/B tests (conductor@'s pass "reader feedback and reading", and
+    # Dinis's A/B testing of 13:20): from the read events (seconds visible, deepest scroll), readers only: median seconds,
+    # median scroll, the share that reached 90% of the page; a variant appears once a page sends one.
+    R_ = collections.defaultdict(lambda: {'tabs': set(), 'views': 0, 's': [], 'scroll': []})
+    for d, hh in hours:
+        for r in hour_rows(data_vault, d, hh):
+            if r.get('type') not in ('view', 'read') or not r.get('path') or groups.get(r.get('sid'), 'readers') != 'readers': continue
+            for k in ((norm(r['path']), ''), (norm(r['path']), r.get('variant') or '')) if r.get('variant') else ((norm(r['path']), ''),):
+                x = R_[k]; x['tabs'].add(r.get('sid'))
+                if r['type'] == 'view': x['views'] += 1
+                else: x['s'].append(r.get('visible_s', 0)); x['scroll'].append(r.get('scroll', 0))
+    med = lambda xs: sorted(xs)[len(xs) // 2] if xs else 0
+    rd = [{'path': p, 'variant': v, 'tabs': len(x['tabs']), 'views': x['views'], 'reads': len(x['s']), 'median_s': med(x['s']), 'median_scroll': med(x['scroll']),
+           'reached_end': round(sum(1 for q in x['scroll'] if q >= 90) / len(x['scroll']), 2) if x['scroll'] else 0} for (p, v), x in R_.items()]
+    jsave(os.path.join(L, 'reading.json'), {'v': 1, 'generated': gen, 'pages': sorted(rd, key=lambda e: (-e['views'], e['path'], e['variant'])),
+        'about': 'Readers only (no synthetic visitors or crawlers): per page, and per page variant when one is sent (A/B tests), the tabs, views, reads, median seconds visible, median deepest scroll (percent) and the share of reads that reached 90% of the page.'})
+    # the investor site (investors@, at Dinis's word, 7 November 2026, about 16:00 UTC: "a dedicated observability lane
+    # just for this ... different audiences"): every page under /investors/, counted per page, language (the segment after
+    # /investors/: pt, es, fr, or en for none), audience (the page's variant: inv-invest, inv-partner, ...) and link tag
+    # (via: vote-<lang> on /investors/language-vote/, the feedback signals fb-*); tabs, views, reads, per group. Counts only.
+    INV = collections.defaultdict(lambda: {'tabs': set(), 'views': zero(), 'reads': 0})
+    def inv_keys(r):
+        pth = norm(r['path']); seg = pth.split('/')[2] if pth.count('/') >= 3 else ''
+        lang = seg if seg in ('pt', 'es', 'fr', 'de', 'it') else 'en'
+        return [('page', pth), ('lang', lang), ('audience', r.get('variant') or 'none'), ('via', r.get('via') or 'none')]
+    for d, hh in hours:
+        for r in hour_rows(data_vault, d, hh):
+            if r.get('type') not in ('view', 'read') or not str(r.get('path', '')).startswith('/investors/'): continue
+            g = groups.get(r.get('sid'), 'readers')
+            for k in inv_keys(r):
+                x = INV[k]; x['tabs'].add(r.get('sid'))
+                if r['type'] == 'view': x['views'][g] += 1
+                else: x['reads'] += 1
+    by = lambda kind: sorted(({kind: v, 'tabs': len(x['tabs']), 'views': x['views'], 'total': sum(x['views'].values()), 'reads': x['reads']}
+                              for (k, v), x in INV.items() if k == kind), key=lambda e: -e['total'])
+    votes = [e for e in by('via') if str(e['via']).startswith('vote-')]
+    jsave(os.path.join(L, 'investors.json'), {'v': 1, 'generated': gen, 'pages': by('page'), 'languages': by('lang'), 'audiences': by('audience'),
+        'via': by('via'), 'votes': [{'lang': e['via'][5:], 'tabs': e['tabs'], 'views': e['total'], 'reader_views': e['views']['readers']} for e in votes],
+        'signals': [e for e in by('via') if str(e['via']).startswith('fb-')],
+        'about': 'The investor site (/investors/): views per group, tabs and reads per page, language, audience (the page variant) and link tag (via: vote-<lang> language votes, fb-* feedback signals). Counts only, no reader detail. A vote is one tab that opened /investors/language-vote/?via=vote-<lang>; votes counts tabs, so a refresh is not a second vote.'})
+    jsave(os.path.join(L, 'places.json'), {'v': 1, 'generated': gen, 'tabs': len(tabs_at), 'city_min': CITY_MIN,
+        'countries': [[cc, n, v] for (cc, n), v in sorted(C.items(), key=lambda x: -sum(x[1].values()))],
+        'regions': regions, 'regions_other': r_other, 'cities': cities, 'cities_other': c_other,
+        'about': 'Tabs (not views) per place, per group, from the browser\'s own lookup (country, region, city; the IP is never read or kept). Every country; a region or city only when at least city_min tabs came from it, the rest summed as other. A shown city carries [lat, lon], its tabs\' mean, rounded to 0.1 degree.'})
+    jsave(os.path.join(L, 'runs.json'), {'v': 1, 'generated': gen, 'runs': allstats['runs'][:200]})
+    # timeline: every hour so far
+    tl = []
+    for day, hh in hours:
+        h = jload(os.path.join(pub_vault, day, hh, 'hour.json'), None)
+        if h: tl.append([f'{day}T{hh}', {g: h['totals'][g]['views'] for g in GROUPS}, sum(h['totals'][g]['reads'] for g in GROUPS), len(h['runs']), len({t['person'] for t in h['team']})])
+    jsave(os.path.join(L, 'timeline.json'), {'v': 1, 'generated': gen, 'hours': tl})
+    # feed: the newest events of the last 12 hours; anonymous traffic only as per-minute counts per page and group
+    feed = []
+    for day, hh in hours[-12:]:
+        traffic = collections.Counter()
+        for r in hour_rows(data_vault, day, hh):
+            t = r.get('type')
+            if t == 'web-summit.agent-run/v1':
+                feed.append({'ts': r.get('run', ''), 'kind': 'agent', 'agent': r.get('agent'), 'trigger': r.get('trigger', ''), 'read': len(r.get('read', [])),
+                             'did': len(r.get('did', [])), 'signed': bool(r.get('signed')), 'notes': (r.get('notes') or '')[:160]})
+            elif t in ('view', 'read') and r.get('path'):
+                g = groups.get(r.get('sid'), 'readers')
+                if r.get('verified') and r.get('person'):
+                    feed.append({'ts': r.get('ts', ''), 'kind': 'team', 'person': r['person'], 'type': t, 'path': norm(r['path']),
+                                 **({'visible_s': r.get('visible_s', 0), 'scroll': r.get('scroll', 0)} if t == 'read' else {})})
+                elif t == 'view': traffic[(str(r.get('ts', ''))[:16], norm(r['path']), g)] += 1
+            if r.get('sig_finding'): pass
+        feed += [{'ts': ts + ('Z' if not ts.endswith('Z') else ''), 'kind': 'traffic', 'path': p, 'group': g, 'n': n} for (ts, p, g), n in traffic.items()]
+    feed.sort(key=lambda e: e['ts'], reverse=True)
+    jsave(os.path.join(L, 'feed.json'), {'v': 1, 'generated': gen, 'events': feed[:300]})
+    # findings: every signature that failed (a claimed key that is not published, or not active, or a bad signature)
+    import re
+    fnd = []
+    for day, hh in hours:
+        for r in hour_rows(data_vault, day, hh):
+            f = r.get('sig_finding')
+            if not f: continue
+            m = re.search(r'(sha256:[0-9a-f]{16}|key [^ ]+)', f)
+            reason = 'unknown key' if 'no published key' in f else 'not active' if 'not active' in f or 'is ' in f and 'not' in f else 'signature or content mismatch' if 'differs' in f or 'Invalid' in f else f.split(':')[0]
+            fnd.append({'ts': r.get('ts') or r.get('run', ''), 'kind': 'agent' if r.get('type') == 'web-summit.agent-run/v1' else 'page', 'reason': reason,
+                        'claimed_key': (m.group(1).replace('key ', '') if m else '')[:40], 'path': norm(r.get('path', '')) if r.get('path') else ''})
+    fnd.sort(key=lambda e: e['ts'], reverse=True)
+    jsave(os.path.join(L, 'findings.json'), {'v': 1, 'generated': gen, 'count': len(fnd), 'by_reason': collections.Counter(f['reason'] for f in fnd).most_common(),
+                                             'by_key': collections.Counter(f['claimed_key'] for f in fnd).most_common(20), 'recent': fnd[:200]})
+    # drains: every drain, the hourly one and the ones run from a browser
+    dl = jload(os.path.join(data_vault, 'state', 'drains.json'), [])
+    dl += DRAINS; DRAINS.clear()
+    jsave(os.path.join(data_vault, 'state', 'drains.json'), dl[-1000:])
+    jsave(os.path.join(L, 'drains.json'), {'v': 1, 'generated': gen, 'drains': dl[-200:][::-1]})
+    extras(data_vault, pub_vault, hours, groups, gen)
+    idx.update(v=1, generated=gen, days=days)
+    jsave(os.path.join(L, 'index.json'), idx)
+    return {'hours': len(todo), 'days': len(dirty_days), 'agents': len(agents), 'pages': len(pages)}
