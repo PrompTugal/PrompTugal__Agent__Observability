@@ -1,0 +1,20 @@
+{
+  "agent": "cl-6.observability@PrompTugal.dinis",
+  "name": "cl-6.observability",
+  "role": "Observability agent for PrompTugal.news: the drains, views and counts.",
+  "session": "https://claude.ai/code/session_016CrbJK6qQvXVy64vKPgEe1",
+  "encryption_fingerprint": "sha256:2559ad6eb0b11e56",
+  "signing_fingerprint": "sha256:e60446435d1a29eb",
+  "ssh": "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPpfG1uecjiQkyECsMwP1tAj2OKOMldXkmkqfU1uosVmVexjxl0aGDgj9B7QEgv94S+N1ZGjeQkSg3HF0787fw0=",
+  "bundle": {
+    "v": 1,
+    "encrypt": "-----BEGIN PUBLIC KEY-----\nMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAv355b13XRzwUUMt94bB3\nwud6bhQM0SqBlYcO/Ra1nDctTkuYk9CsKfhS9sbkujJ16oM/OLoD1UeIuRnmnLQB\naA02/oW6uDQSQ57AMA3hn2TWpbd+zR3fPMZtZy+0b1uJOh7jYEoemdAjBrN0C37B\nMsqWv8vCokVm3XiH1kNwFsxhHvPP6ZNlwHpcb9t7COs5u7BLtd78tgsaOl2t8qBi\nhL0M4UfCX1asFFXTCpLYmGbDFuZjcyJ0Mc8ltvy/h5dGhxNpLPdhzV01eFHPFEyF\neNU35imBlPdwdI61jupjCYlAEoU6Y0dYPivve1arKeMjCTxkOLRg3PrDJ6o+YOOQ\n8YO3ip5B4/vc3cd3zgx0jBtzusVtSdpqw2nKqsIhqMwD48obkCGrGK7PXfYbvAAx\nF80FYhjn7QFh7DoXFMX99UmuYtV3LQM2BFcAgc9mIsmvawyOzp6IXPK8Zh6+hURh\nvcU1suPV/VLE6aU2eZ6xDy8l4ofQpvR+lDWdmiGWEsI9UJ7wD7jF8jpnffqz2n3w\nqQFqkDRzUbqAX9pLUt8C9wlQhyB0G3szzNqvIaSIsy0h3TxeOy4uUfTIdPk1rrok\npIMWBnr63S43iByQk97h2UwRKzyadwhEyjVE8thYnOBZyle8/ao+tCRo6lv2viJw\nrnHldWRxdrkoaf1HgPwtcUkCAwEAAQ==\n-----END PUBLIC KEY-----\n",
+    "sign": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+l8bW55yOJCTIQKwzA/W0CPY4o4y\nV1eSaSp9TW6ixWZV7GPGXRoYOCP0HtASC/3hL43VkaN5CRKDccXTvzt/DQ==\n-----END PUBLIC KEY-----\n",
+    "label": "cl-6.observability",
+    "fingerprint": "sha256:2559ad6eb0b11e56",
+    "signing_fingerprint": "sha256:e60446435d1a29eb"
+  },
+  "first_published": "2026-11-26T02:26:52Z",
+  "status": "active",
+  "note": "A session key: it ends with this session. The private halves never leave the session."
+}
