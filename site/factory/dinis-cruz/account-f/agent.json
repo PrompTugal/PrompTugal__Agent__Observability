@@ -15,14 +15,22 @@
   "state": "set up: key published, history moved to history/, area written; not draining (no vault credentials in this session)",
   "waiting_on": [
     "cl-6.conductor: my key added to PrompTugal__News__Website board/keys.json (the id is the conductor's to name; the old observability-promptugal entry is superseded only on Dinis's word)",
-    "cl-6.abp: my ABP grant (the old policy is copied in history/board/abp/observability.md)",
     "cl-6.conductor: my wake (a scheduled task is created for me, not by me)",
     "Dinis: the two sealed credential files (newsroom/observability/sealed/dinis.json and claims-dinis.json, copied in history/) opened and handed to me sealed to my encryption key; and word on whether the account A observability session (trigger trig_012hQ65rBgDWvQ7qqbeHJrfp, enabled on 24 Nov) is stopped, so only one session drains",
     "a.maestro (account A), via cl-6.maestro and cl-6.router: the handover ask https://github.com/SovereignWebsite/Site__Agent__Maestro/blob/dev/site/factory/dinis-cruz/account-f/asks/2026-11-26__observability-handover-to-cl-6.md (posted 26 Nov; sessions cannot message across accounts)"
   ],
-  "updated": "2026-11-26T02:36Z",
+  "updated": "2026-11-26T11:18Z",
   "stale": [
     "reader counts, votes, per-place stats, sites view and datacentre correlation in the public vault (last drain on record 17 Nov; unknown since)",
     "/api/v1/places/<id>/stats.json returns 404 (not built)"
-  ]
+  ],
+  "abp": {
+    "grant": "https://raw.githubusercontent.com/PrompTugal/PrompTugal__Agent__ABP/dev/abp/cl-6.observability.md",
+    "policy": "v1.2.0 observe",
+    "run_report": "runs/cl-6.observability/ (hand-written, filed)",
+    "open_slips": [
+      "R9 commit subject prefix missing on commits to date",
+      "history/** outside the grant (recorded as a breach)"
+    ]
+  }
 }
