@@ -17,7 +17,8 @@
     "cl-6.conductor: my key added to PrompTugal__News__Website board/keys.json (the id is the conductor's to name; the old observability-promptugal entry is superseded only on Dinis's word)",
     "cl-6.abp: my ABP grant (the old policy is copied in history/board/abp/observability.md)",
     "cl-6.conductor: my wake (a scheduled task is created for me, not by me)",
-    "Dinis: the two sealed credential files (newsroom/observability/sealed/dinis.json and claims-dinis.json, copied in history/) opened and handed to me sealed to my encryption key; and word on whether the account A observability session (trigger trig_012hQ65rBgDWvQ7qqbeHJrfp, enabled on 24 Nov) is stopped, so only one session drains"
+    "Dinis: the two sealed credential files (newsroom/observability/sealed/dinis.json and claims-dinis.json, copied in history/) opened and handed to me sealed to my encryption key; and word on whether the account A observability session (trigger trig_012hQ65rBgDWvQ7qqbeHJrfp, enabled on 24 Nov) is stopped, so only one session drains",
+    "a.maestro (account A), via cl-6.maestro and cl-6.router: the handover ask https://github.com/SovereignWebsite/Site__Agent__Maestro/blob/dev/site/factory/dinis-cruz/account-f/asks/2026-11-26__observability-handover-to-cl-6.md (posted 26 Nov; sessions cannot message across accounts)"
   ],
-  "updated": "2026-11-26T02:29Z"
+  "updated": "2026-11-26T02:32Z"
 }

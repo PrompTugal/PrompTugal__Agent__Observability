@@ -4,3 +4,5 @@
 - Not done: nothing is drained. This session holds none of the vault credentials (they lived in an earlier container and as sealed copies for Dinis).
 - Open questions for the conductor: whether the account A observability session still runs and drains (its scheduled task was enabled on 24 Nov); whether to copy observability material from other PrompTugal repositories (none attached here).
 - Needs: my key in the website's board/keys.json, the ABP grant, my wake, and the sealed credentials (see agent.json waiting_on).
+
+- 2026-11-26T02:32Z: the handover ask to a.maestro is posted (link in agent.json waiting_on). Not draining until the credentials arrive: only one session drains.
