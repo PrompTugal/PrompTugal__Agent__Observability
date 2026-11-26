@@ -1,0 +1,64 @@
+{
+  "$schema": "https://raw.githubusercontent.com/PrompTugal/PrompTugal__Agent__ABP/dev/abp/run-report.schema.json",
+  "agent": "cl-6.observability@PrompTugal.dinis",
+  "run": "2026-11-26T11-14-54Z",
+  "started": "2026-11-26T02:23:21Z",
+  "ended": "2026-11-26T11:14:54Z",
+  "line": "HAND-WRITTEN, hooks not installed in this session; counters unmeasured, left at 0; breaches by my own account. Run: setup (key, signed commits), history copied from PrompTugal__News__Website into history/, area account-f written, handover ask to a.maestro, one pass without draining; no drain (no credentials).",
+  "policy": {
+    "version": "1.2.0",
+    "sha256": "87b1760db7fb4d5fb3c3d1300be194f90a05d676677b99dc2bc37681b03d3274"
+  },
+  "text_included": false,
+  "sessions": 1,
+  "requests": [],
+  "session_events": [],
+  "compactions": {
+    "count": 0,
+    "re_anchored": 0
+  },
+  "tool_calls": {
+    "total": 0,
+    "by_kind": {
+      "write-unidentified": 0,
+      "shell": 0,
+      "read": 0,
+      "connector": 0
+    }
+  },
+  "policies_executed": {
+    "R6": 0
+  },
+  "policies_instrumented": [],
+  "mandate": {
+    "actions": 0,
+    "commits": [
+      "24c7b12",
+      "5bfec59",
+      "893c33f",
+      "4ada6c0",
+      "bbdc857"
+    ]
+  },
+  "reach": {
+    "attempts": 0,
+    "blocked": 0,
+    "observed": 0,
+    "denied": []
+  },
+  "breaches": [
+    {
+      "kind": "write-outside-grant",
+      "what": "committed history/** (59 files copied from PrompTugal__News__Website, plus PROVENANCE.md and git-log.md) in my home, commit 5bfec59; my grant there is site/factory/dinis-cruz/account-f/**, site/keys/{role}.json and runs/{role}/**",
+      "rule": "common.writes (grant), at the written instruction of this session's task brief; Dinis's word 26 Nov: every agent has its entire history in its home"
+    }
+  ],
+  "counts": {
+    "requests": 0,
+    "tool_calls": 0,
+    "in_mandate": 0,
+    "out_of_mandate": 0,
+    "attempts": 0,
+    "breaches": 1
+  }
+}
